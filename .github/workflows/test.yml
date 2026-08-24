@@ -1,0 +1,24 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check zsh syntax
+        run: |
+          zsh -n bin/mi-ez-a-hatterkep
+          zsh -n install.sh
+          zsh -n tests/test_wallpaper_info.zsh
+
+      - name: Run tests
+        run: ./tests/test_wallpaper_info.zsh

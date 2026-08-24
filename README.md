@@ -1,5 +1,7 @@
 # mactools
 
+[![Test](https://github.com/szokel/mactools/actions/workflows/test.yml/badge.svg)](https://github.com/szokel/mactools/actions/workflows/test.yml)
+
 Small, inspectable command-line utilities for macOS.
 
 The first tool, `mi-ez-a-hatterkep` (Hungarian for “What is this wallpaper?”), identifies the Apple Aerial wallpaper currently displayed by macOS—including wallpapers selected by Landscape shuffle.
