@@ -1,0 +1,139 @@
+#!/bin/zsh
+
+set -u
+
+readonly program_name="${0:t}"
+readonly version="0.1.0"
+readonly default_manifest="$HOME/Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json"
+readonly default_video_directory="$HOME/Library/Application Support/com.apple.wallpaper/aerials/videos"
+
+usage() {
+  /bin/cat <<EOF
+Usage: $program_name [OPTION]
+
+Identify the Apple Aerial wallpaper currently displayed by macOS.
+
+Options:
+  --dialog    Show the result in a native macOS dialog
+  --details   Show the name, asset ID, shot ID, and video path
+  --json      Print machine-readable JSON
+  --help      Show this help
+  --version   Show the version
+EOF
+}
+
+mode="text"
+case "${1:-}" in
+  "") ;;
+  --dialog) mode="dialog" ;;
+  --details) mode="details" ;;
+  --json) mode="json" ;;
+  --help|-h)
+    usage
+    exit 0
+    ;;
+  --version)
+    print -- "$program_name $version"
+    exit 0
+    ;;
+  *)
+    print -u2 -- "Unknown option: $1"
+    usage >&2
+    exit 64
+    ;;
+esac
+
+if [[ "$(uname -s)" != "Darwin" && -z "${MACTOOLS_ALLOW_NON_MACOS:-}" ]]; then
+  print -u2 "This command requires macOS."
+  exit 69
+fi
+
+manifest="${MACTOOLS_WALLPAPER_MANIFEST:-$default_manifest}"
+video_directory="${MACTOOLS_WALLPAPER_VIDEO_DIRECTORY:-$default_video_directory}"
+
+if [[ ! -r "$manifest" ]]; then
+  print -u2 "The Apple Aerial wallpaper catalog was not found: $manifest"
+  exit 66
+fi
+
+find_active_video() {
+  if [[ -n "${MACTOOLS_ACTIVE_VIDEO:-}" ]]; then
+    print -r -- "$MACTOOLS_ACTIVE_VIDEO"
+    return 0
+  fi
+
+  local entry
+  while IFS= read -r entry; do
+    case "$entry" in
+      n"$video_directory"/*.mov)
+        print -r -- "${entry#n}"
+        return 0
+        ;;
+    esac
+  done < <(/usr/sbin/lsof -Fn -c Wallpaper 2>/dev/null)
+
+  return 1
+}
+
+active_video="$(find_active_video)" || {
+  print -u2 "The active Aerial video could not be determined. Display the wallpaper or Lock Screen, then try again."
+  exit 2
+}
+
+asset_id="${active_video:t:r}"
+
+/usr/bin/python3 - "$manifest" "$asset_id" "$active_video" "$mode" <<'PY'
+import json
+import subprocess
+import sys
+
+
+manifest_path, asset_id, video_path, mode = sys.argv[1:]
+
+try:
+    with open(manifest_path, encoding="utf-8") as file:
+        manifest = json.load(file)
+except (OSError, json.JSONDecodeError) as error:
+    print(f"Unable to read the Apple Aerial catalog: {error}", file=sys.stderr)
+    raise SystemExit(65)
+
+asset = next(
+    (candidate for candidate in manifest.get("assets", []) if candidate.get("id") == asset_id),
+    None,
+)
+
+name = asset_id
+shot_id = None
+if asset is not None:
+    name = asset.get("accessibilityLabel") or asset.get("localizedNameKey") or asset_id
+    shot_id = asset.get("shotID")
+
+result = {
+    "name": name,
+    "asset_id": asset_id,
+    "shot_id": shot_id,
+    "video_path": video_path,
+    "catalog_match": asset is not None,
+}
+
+if mode == "json":
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+elif mode == "details":
+    print(f"Wallpaper: {name}")
+    print(f"Asset ID: {asset_id}")
+    print(f"Shot ID: {shot_id or '-'}")
+    print(f"Video: {video_path}")
+elif mode == "dialog":
+    script = '''
+on run argv
+  display dialog (item 1 of argv) buttons {"OK"} default button "OK" with title "Mi ez a háttérkép?"
+end run
+'''
+    completed = subprocess.run(
+        ["/usr/bin/osascript", "-e", script, f"Aktuális háttérkép: {name}"],
+        check=False,
+    )
+    raise SystemExit(completed.returncode)
+else:
+    print(f"Aktuális háttérkép: {name}")
+PY
